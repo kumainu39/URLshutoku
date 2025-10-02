@@ -1,0 +1,27 @@
+[project]
+name = "urlshutoku"
+version = "0.1.0"
+description = "Company homepage and metadata collector"
+authors = ["URLshutoku Maintainers <maintainers@example.com>"]
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "httpx",
+    "beautifulsoup4",
+    "python-dotenv",
+    "sqlalchemy",
+    "jinja2",
+    "pydantic>=2.0",
+    "rapidfuzz",
+    "loguru",
+]
+
+[project.optional-dependencies]
+llm = [
+    "llama-cpp-python>=0.2.0",
+]
+
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"

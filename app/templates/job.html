@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="job-detail">
+  <h2>ジョブ {{ job.job_id }}</h2>
+  <p>進捗: {{ job.processed }}/{{ job.total or '?' }}</p>
+  <ul class="stats">
+    <li>成功: {{ job.successes }}</li>
+    <li>失敗: {{ job.failures }}</li>
+    <li>スキップ: {{ job.skipped }}</li>
+  </ul>
+  <section class="logs">
+    <h3>ログ</h3>
+    <pre>
+{% for message in job.log.messages %}{{ message }}
+{% endfor %}
+    </pre>
+  </section>
+  <p><a href="/jobs/{{ job.job_id }}">更新</a> / <a href="/">トップへ戻る</a></p>
+</section>
+{% endblock %}
