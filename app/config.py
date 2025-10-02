@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 
 class Settings(BaseModel):
     database_url: str = Field(
-        default="sqlite:///./companies.db",
+        default="postgresql+psycopg2://masaki:39masaki@localhost:5432/companyinfo",
         description="SQLAlchemy database URL where company records are stored.",
     )
     search_engine: str = Field(
