@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="form-section">
+  <h2>新しいジョブを開始</h2>
+  <form method="post" action="/jobs">
+    <div class="field">
+      <label for="prefecture">都道府県フィルタ</label>
+      <input type="text" id="prefecture" name="prefecture" placeholder="例: 東京都" />
+    </div>
+    <div class="field">
+      <label for="limit">最大処理件数</label>
+      <input type="number" id="limit" name="limit" min="1" />
+    </div>
+    <div class="field">
+      <label for="chunk_size">1回の取得件数</label>
+      <input type="number" id="chunk_size" name="chunk_size" min="10" value="100" />
+    </div>
+    <div class="field">
+      <label for="concurrency">並列数</label>
+      <input type="number" id="concurrency" name="concurrency" min="1" value="5" />
+    </div>
+    <div class="field checkbox">
+      <label>
+        <input type="checkbox" name="skip_existing" value="1" checked /> 既にURLが存在する場合はスキップ
+      </label>
+    </div>
+    <button type="submit">ジョブ開始</button>
+  </form>
+</section>
+
+<section class="jobs-section">
+  <h2>ジョブ一覧</h2>
+  <ul class="job-list">
+    {% for job in jobs.values() %}
+    <li>
+      <a href="/jobs/{{ job.job_id }}">ジョブ {{ job.job_id }}</a>
+      <span>進捗: {{ job.processed }}/{{ job.total or '?' }}</span>
+    </li>
+    {% else %}
+    <li>実行中のジョブはありません。</li>
+    {% endfor %}
+  </ul>
+</section>
+
+<section class="settings">
+  <h2>現在の設定</h2>
+  <dl>
+    <dt>データベースURL</dt>
+    <dd>{{ settings.database_url }}</dd>
+    <dt>検索エンジン</dt>
+    <dd>{{ settings.search_engine }}</dd>
+    <dt>検索結果最大数</dt>
+    <dd>{{ settings.search_result_limit }}</dd>
+    <dt>HTTPタイムアウト</dt>
+    <dd>{{ settings.http_timeout_seconds }} 秒</dd>
+    <dt>LLM使用</dt>
+    <dd>{{ '有効' if settings.llm_enabled else '無効' }}</dd>
+  </dl>
+</section>
+{% endblock %}
