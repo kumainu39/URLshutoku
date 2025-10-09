@@ -6,7 +6,12 @@
   <form method="post" action="/jobs">
     <div class="field">
       <label for="prefecture">都道府県フィルタ</label>
-      <input type="text" id="prefecture" name="prefecture" placeholder="例: 東京都" />
+      <input type="text" id="prefecture" name="prefecture" list="prefecture-options" placeholder="例: 東京都" autocomplete="off" />
+      <datalist id="prefecture-options">
+        {% for pref in prefectures %}
+        <option value="{{ pref }}"></option>
+        {% endfor %}
+      </datalist>
     </div>
     <div class="field">
       <label for="limit">最大処理件数</label>

@@ -11,10 +11,11 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from loguru import logger
 
+from . import db
 from .config import Settings, get_settings
 from .services.pipeline import CrawlPipeline, JobConfig, JobManager, JobState
 
-app = FastAPI(title="URL取得支援ツール")
+app = FastAPI(title="URL取得支援チE�Eル")
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
 
@@ -25,12 +26,14 @@ pipeline = CrawlPipeline()
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request) -> HTMLResponse:
     settings: Settings = get_settings()
+    prefectures = db.fetch_prefectures(pipeline.engine)
     return templates.TemplateResponse(
         "index.html",
         {
             "request": request,
             "jobs": job_manager.jobs,
             "settings": settings,
+            "prefectures": prefectures,
         },
     )
 
@@ -60,9 +63,9 @@ async def create_job(
     await job_manager.create_job(state)
 
     async def _run_job() -> None:
-        logger.info("ジョブ開始: {job_id}", job_id=job_id)
+        logger.info("ジョブ開姁E {job_id}", job_id=job_id)
         await pipeline.run(state, on_update=lambda _: None)
-        logger.info("ジョブ終了: {job_id}", job_id=job_id)
+        logger.info("ジョブ終亁E {job_id}", job_id=job_id)
 
     asyncio.create_task(_run_job())
 

@@ -13,6 +13,7 @@ from sqlalchemy import (
     String,
     Table,
     create_engine,
+    inspect,
     select,
     text,
     update,
@@ -57,6 +58,60 @@ def session_scope() -> Iterator[Engine]:
 def ensure_schema(engine: Engine) -> None:
     metadata.create_all(engine)
 
+    inspector = inspect(engine)
+    if not inspector.has_table("companies"):
+        return
+
+    existing_columns = {col["name"] for col in inspector.get_columns("companies")}
+    dialect = engine.dialect.name
+
+    added_id = False
+
+    with engine.begin() as conn:
+        if "id" not in existing_columns:
+            added_id = True
+            if dialect == "postgresql":
+                conn.execute(text("ALTER TABLE companies ADD COLUMN IF NOT EXISTS id BIGSERIAL"))
+            else:
+                conn.execute(text("ALTER TABLE companies ADD COLUMN IF NOT EXISTS id INTEGER"))
+        if "homepage_url" not in existing_columns:
+            conn.execute(text("ALTER TABLE companies ADD COLUMN IF NOT EXISTS homepage_url TEXT"))
+        if "capital" not in existing_columns:
+            conn.execute(text("ALTER TABLE companies ADD COLUMN IF NOT EXISTS capital TEXT"))
+        if "industry" not in existing_columns:
+            conn.execute(text("ALTER TABLE companies ADD COLUMN IF NOT EXISTS industry TEXT"))
+        if "last_checked_at" not in existing_columns:
+            conn.execute(text("ALTER TABLE companies ADD COLUMN IF NOT EXISTS last_checked_at TIMESTAMP"))
+        if "last_status" not in existing_columns:
+            conn.execute(text("ALTER TABLE companies ADD COLUMN IF NOT EXISTS last_status TEXT"))
+        if "skip" not in existing_columns:
+            if dialect == "postgresql":
+                conn.execute(text("ALTER TABLE companies ADD COLUMN IF NOT EXISTS skip BOOLEAN DEFAULT FALSE"))
+            else:
+                conn.execute(text("ALTER TABLE companies ADD COLUMN IF NOT EXISTS skip BOOLEAN DEFAULT 0"))
+
+    if added_id:
+        with engine.begin() as conn:
+            if dialect == "postgresql":
+                conn.execute(
+                    text(
+                        "UPDATE companies "
+                        "SET id = nextval(pg_get_serial_sequence('companies', 'id')) "
+                        "WHERE id IS NULL",
+                    )
+                )
+                conn.execute(text("ALTER TABLE companies ALTER COLUMN id SET NOT NULL"))
+            else:
+                conn.execute(text("UPDATE companies SET id = rowid WHERE id IS NULL"))
+            conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS idx_companies_id ON companies(id)"))
+
+    with engine.begin() as conn:
+        if dialect == "postgresql":
+            conn.execute(text("ALTER TABLE companies ALTER COLUMN skip SET DEFAULT FALSE"))
+            conn.execute(text("UPDATE companies SET skip = FALSE WHERE skip IS NULL"))
+        else:
+            conn.execute(text("UPDATE companies SET skip = 0 WHERE skip IS NULL"))
+
 
 def fetch_companies(
     engine: Engine,
@@ -78,6 +133,40 @@ def fetch_companies(
     with engine.begin() as conn:
         result = conn.execute(query)
         return [dict(row._mapping) for row in result]
+
+
+def fetch_prefectures(engine: Engine) -> List[str]:
+    inspector = inspect(engine)
+    if not inspector.has_table("companies"):
+        return []
+    columns = {col["name"] for col in inspector.get_columns("companies")}
+    prefecture_column: Optional[str] = None
+    for candidate in ("prefecture_name", "prefecture"):
+        if candidate in columns:
+            prefecture_column = candidate
+            break
+    if prefecture_column is None:
+        return []
+    stmt = text(
+        f"SELECT DISTINCT {prefecture_column} AS prefecture "
+        f"FROM companies "
+        f"WHERE {prefecture_column} IS NOT NULL AND {prefecture_column} <> '' "
+        f"ORDER BY {prefecture_column}"
+    )
+    prefectures: List[str] = []
+    seen = set()
+    with engine.begin() as conn:
+        result = conn.execute(stmt)
+        for row in result:
+            value = getattr(row, "prefecture", row[0])
+            if value is None:
+                continue
+            name = value.strip() if isinstance(value, str) else value
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            prefectures.append(name)
+    return prefectures
 
 
 def update_company(
