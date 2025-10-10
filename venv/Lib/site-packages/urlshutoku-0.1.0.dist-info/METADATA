@@ -1,0 +1,22 @@
+Metadata-Version: 2.4
+Name: urlshutoku
+Version: 0.1.0
+Summary: Company homepage and metadata collector
+Author-email: URLshutoku Maintainers <maintainers@example.com>
+Requires-Python: >=3.10
+License-File: LICENSE
+Requires-Dist: fastapi
+Requires-Dist: uvicorn[standard]
+Requires-Dist: httpx
+Requires-Dist: beautifulsoup4
+Requires-Dist: python-dotenv
+Requires-Dist: python-multipart
+Requires-Dist: sqlalchemy
+Requires-Dist: psycopg2-binary
+Requires-Dist: jinja2
+Requires-Dist: pydantic>=2.0
+Requires-Dist: rapidfuzz
+Requires-Dist: loguru
+Provides-Extra: llm
+Requires-Dist: llama-cpp-python>=0.2.0; extra == "llm"
+Dynamic: license-file

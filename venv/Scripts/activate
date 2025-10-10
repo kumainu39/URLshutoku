@@ -35,7 +35,7 @@ deactivate () {
 # unset irrelevant variables
 deactivate nondestructive
 
-VIRTUAL_ENV="C:\Users\info\OneDrive\新しいフォルダー\VScode\会社情報収集\URLshutoku\venv"
+VIRTUAL_ENV="C:\URLshutoku\venv"
 export VIRTUAL_ENV
 
 _OLD_VIRTUAL_PATH="$PATH"

@@ -57,9 +57,16 @@ class CrawlPipeline:
 
         async def _run_company(company: dict) -> None:
             async with semaphore:
-                await self._process_company(state, company)
-                if on_update:
-                    on_update(state)
+                try:
+                    await self._process_company(state, company)
+                except Exception as exc:  # keep pipeline running on per-company failure
+                    async with self._state_lock:
+                        state.failures += 1
+                        state.processed += 1
+                        state.log.add(f"処理中にエラー: {exc}")
+                finally:
+                    if on_update:
+                        on_update(state)
 
         pending: List[asyncio.Task[None]] = []
 
@@ -106,7 +113,11 @@ class CrawlPipeline:
 
         async with self._state_lock:
             state.log.add(f"検索開始: {company['name']} ({company['corporate_number']})")
-        candidate_urls = await search.search_company(company["name"], company["address"])
+        # Use city-level address (prefecture + city) for search queries
+        city_address = f"{company.get('prefecture_name', '')}{company.get('city_name', '')}".strip()
+        if not city_address:
+            city_address = company.get("address")
+        candidate_urls = await search.search_company(company["name"], city_address)
 
         if not candidate_urls:
             async with self._state_lock:
@@ -124,10 +135,16 @@ class CrawlPipeline:
                 state.log.add("候補URLが見つかりませんでした。")
             return
 
+        async with self._state_lock:
+            state.log.add(f"候補URL: {len(candidate_urls)}件")
+
         for url in candidate_urls:
+            async with self._state_lock:
+                state.log.add(f"確認中: {url}")
             soup = await fetch.fetch_html(url)
             if soup is None:
                 continue
+            # Verification uses full address (including street number) via company['address']
             result = await self._verify_candidate(soup, company, url)
             if result is None:
                 continue
@@ -201,8 +218,3 @@ class JobManager:
 
     def get(self, job_id: str) -> Optional[JobState]:
         return self.jobs.get(job_id)
-
-    async def update(self, job_id: str, updater: Callable[[JobState], None]) -> None:
-        async with self._lock:
-            if job_id in self.jobs:
-                updater(self.jobs[job_id])

@@ -6,19 +6,26 @@
   <form method="post" action="/jobs">
     <div class="field">
       <label for="prefecture">都道府県フィルタ</label>
-      <input type="text" id="prefecture" name="prefecture" list="prefecture-options" placeholder="例: 東京都" autocomplete="off" />
-      <datalist id="prefecture-options">
-        {% for pref in prefectures %}
-        <option value="{{ pref }}"></option>
+      <select id="prefecture" name="prefecture">
+        <option value="">（未選択）</option>
+        {% for region, prefs in prefecture_groups %}
+        <optgroup label="{{ region }}">
+          {% for pref in prefs %}
+          <option value="{{ pref }}">{{ pref }}</option>
+          {% endfor %}
+        </optgroup>
         {% endfor %}
-      </datalist>
+      </select>
+      <div id="pref-stats" style="margin-top:4px;color:#555;">
+        未URL件数: <span id="missing-count">-</span> / 合計: <span id="total-count">-</span>
+      </div>
     </div>
     <div class="field">
-      <label for="limit">最大処理件数</label>
+      <label for="limit">最大処理数</label>
       <input type="number" id="limit" name="limit" min="1" />
     </div>
     <div class="field">
-      <label for="chunk_size">1回の取得件数</label>
+      <label for="chunk_size">1回あたり取得件数</label>
       <input type="number" id="chunk_size" name="chunk_size" min="10" value="100" />
     </div>
     <div class="field">
@@ -27,11 +34,12 @@
     </div>
     <div class="field checkbox">
       <label>
-        <input type="checkbox" name="skip_existing" value="1" checked /> 既にURLが存在する場合はスキップ
+        <input type="checkbox" name="skip_existing" value="1" checked /> 既にURLが存在する場合にスキップ
       </label>
     </div>
     <button type="submit">ジョブ開始</button>
   </form>
+  
 </section>
 
 <section class="jobs-section">
@@ -63,4 +71,27 @@
     <dd>{{ '有効' if settings.llm_enabled else '無効' }}</dd>
   </dl>
 </section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  (function () {
+    const input = document.getElementById('prefecture');
+    const missing = document.getElementById('missing-count');
+    const total = document.getElementById('total-count');
+    async function updateStats() {
+      const v = (input.value || '').trim();
+      if (!v) { missing.textContent = '-'; total.textContent = '-'; return; }
+      try {
+        const resp = await fetch(`/stats?prefecture=${encodeURIComponent(v)}`);
+        if (!resp.ok) return;
+        const data = await resp.json();
+        missing.textContent = data.missing;
+        total.textContent = data.total;
+      } catch (e) { /* ignore */ }
+    }
+    input.addEventListener('change', updateStats);
+    input.addEventListener('blur', updateStats);
+  })();
+  </script>
 {% endblock %}

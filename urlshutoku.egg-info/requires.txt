@@ -1,0 +1,15 @@
+fastapi
+uvicorn[standard]
+httpx
+beautifulsoup4
+python-dotenv
+python-multipart
+sqlalchemy
+psycopg2-binary
+jinja2
+pydantic>=2.0
+rapidfuzz
+loguru
+
+[llm]
+llama-cpp-python>=0.2.0

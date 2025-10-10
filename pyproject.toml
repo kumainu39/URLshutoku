@@ -2,7 +2,7 @@
 name = "urlshutoku"
 version = "0.1.0"
 description = "Company homepage and metadata collector"
-authors = ["URLshutoku Maintainers <maintainers@example.com>"]
+authors = [{ name = "URLshutoku Maintainers", email = "maintainers@example.com" }]
 requires-python = ">=3.10"
 dependencies = [
     "fastapi",
@@ -12,8 +12,10 @@ dependencies = [
     "python-dotenv",
     "python-multipart",
     "sqlalchemy",
+    "psycopg2-binary",
     "jinja2",
     "pydantic>=2.0",
+    "pydantic-settings>=2.0",
     "rapidfuzz",
     "loguru",
 ]

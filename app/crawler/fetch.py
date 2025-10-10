@@ -11,6 +11,9 @@ from ..config import get_settings
 
 
 async def fetch_html(url: str) -> Optional[BeautifulSoup]:
+    # Normalize protocol-relative links if any slipped through
+    if url.startswith("//"):
+        url = "https:" + url
     settings = get_settings()
     headers = {"User-Agent": settings.user_agent}
     async with httpx.AsyncClient(timeout=settings.http_timeout_seconds, headers=headers, follow_redirects=True) as client:
