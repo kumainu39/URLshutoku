@@ -5,6 +5,7 @@ app/__init__.py
 app/config.py
 app/db.py
 app/main.py
+app/prefectures.py
 app/crawler/__init__.py
 app/crawler/extract.py
 app/crawler/fetch.py

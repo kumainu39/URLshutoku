@@ -15,6 +15,7 @@ Requires-Dist: sqlalchemy
 Requires-Dist: psycopg2-binary
 Requires-Dist: jinja2
 Requires-Dist: pydantic>=2.0
+Requires-Dist: pydantic-settings>=2.0
 Requires-Dist: rapidfuzz
 Requires-Dist: loguru
 Provides-Extra: llm

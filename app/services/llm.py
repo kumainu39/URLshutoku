@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Optional
@@ -62,21 +62,40 @@ class LLMVerifier:
         if self._llm is None:
             logger.warning("LLM requested but model failed to load.")
             return None
+                # Build a compact prompt and keep the page text well within the context window.
+        # Use a conservative character budget to avoid token overflow on JP content.
+        char_budget = max(512, min(2000, int(self.settings.llm_context_window * 0.6)))
+        snippet = (request.page_text or "")[:char_budget]
         prompt = (
-            "以下は企業ウェブサイトのテキストです。会社名と住所が一致しているかを true/false で答えてください。\n"
+            "以下はあるウェブページの本文テキストです。次の2点を判定してください。\n"
+            "1) 会社名と住所が一致しているか (match)\n"
+            "2) このページが企業の公式ホームページか (official_homepage)。企業ディレクトリ、データベース、求人・転職、ニュース/PR配信サイトはNO。\n"
+            "出力は JSON で {\"match\": true/false, \"official_homepage\": true/false} のみ返してください。余計な文字は出力しないでください。\n"
             f"会社名: {request.company_name}\n住所: {request.address}\n---\n"
-            f"{request.page_text[: self.settings.llm_context_window]}\n"
-            "回答は JSON で {\"match\": true/false} のみを返してください。"
+            f"{snippet}\n"
         )
+)
         try:
-            response = self._llm(prompt=prompt, max_tokens=64, temperature=0.1, echo=False)
+            response = self._llm(prompt=prompt, max_tokens=128, temperature=0.1, echo=False)
         except Exception as exc:  # pragma: no cover - runtime safety
             logger.warning("LLM inference failed: {exc}", exc=exc)
             return None
         text = response.get("choices", [{}])[0].get("text", "").strip()
         logger.debug("LLM response: {text}", text=text)
-        if "true" in text.lower():
-            return True
-        if "false" in text.lower():
-            return False
-        return None
+        try:
+            import json
+            obj = json.loads(text)
+            match = bool(obj.get("match"))
+            official = bool(obj.get("official_homepage"))
+            return True if (match and official) else False
+        except Exception:
+            low = text.lower()
+            if "official_homepage\"\s*:\s*true" in low and "match\"\s*:\s*true" in low:
+                return True
+            if "official_homepage\"\s*:\s*false" in low or "match\"\s*:\s*false" in low:
+                return False
+            if "true" in low and "false" not in low:
+                return True
+            if "false" in low:
+                return False
+            return None

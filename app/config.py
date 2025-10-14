@@ -21,7 +21,7 @@ try:  # pragma: no cover - runtime check
             description="Identifier of the search backend to use for candidate URL discovery.",
         )
         search_result_limit: int = Field(
-            default=5,
+            default=10,
             description="Maximum number of search engine results to consider per company.",
         )
         http_timeout_seconds: float = Field(default=15.0)
@@ -36,6 +36,11 @@ try:  # pragma: no cover - runtime check
         llm_model_path: Optional[Path] = None
         llm_gpu_layers: int = 0
         llm_context_window: int = 4096
+        # Recheck window for companies whose homepage was not found
+        recheck_not_found_days: int = Field(
+            default=30,
+            description="After this many days, re-queue companies marked NOT_FOUND for another search.",
+        )
 
         model_config = SettingsConfigDict(
             env_file=".env",
@@ -58,7 +63,7 @@ except Exception:
             description="SQLAlchemy database URL where company records are stored.",
         )
         search_engine: str = Field(default="duckduckgo")
-        search_result_limit: int = Field(default=5)
+        search_result_limit: int = Field(default=10)
         http_timeout_seconds: float = Field(default=15.0)
         concurrency_limit: int = Field(default=5)
         user_agent: str = Field(
@@ -71,6 +76,7 @@ except Exception:
         llm_model_path: Optional[Path] = None
         llm_gpu_layers: int = 0
         llm_context_window: int = 4096
+        recheck_not_found_days: int = Field(default=30)
 
         class Config:
             extra = "ignore"
@@ -114,4 +120,5 @@ except Exception:
             llm_model_path=_get_path("LLM_MODEL_PATH"),
             llm_gpu_layers=_get_int("LLM_GPU_LAYERS", Settings().llm_gpu_layers),
             llm_context_window=_get_int("LLM_CONTEXT_WINDOW", Settings().llm_context_window),
+            recheck_not_found_days=_get_int("RECHECK_NOT_FOUND_DAYS", Settings().recheck_not_found_days),
         )

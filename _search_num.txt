@@ -1,0 +1,237 @@
+   1: from __future__ import annotations
+   2: 
+   3: import asyncio
+   4: import re
+   5: import html as _html
+   6: from typing import List, Tuple
+   7: 
+   8: import httpx
+   9: from loguru import logger
+  10: 
+  11: from ..config import get_settings
+  12: from .normalize import normalize_text
+  13: 
+  14: DUCKDUCKGO_SEARCH_URL = "https://html.duckduckgo.com/html/"
+  15: 
+  16: 
+  17: async def duckduckgo_search(query: str, *, limit: int) -> List[str]:
+  18:     params = {"q": query, "kl": "jp-jp", "df": "y"}
+  19:     settings = get_settings()
+  20:     headers = {"User-Agent": settings.user_agent}
+  21:     async with httpx.AsyncClient(timeout=settings.http_timeout_seconds, headers=headers, follow_redirects=True) as client:
+  22:         try:
+  23:             response = await client.get(DUCKDUCKGO_SEARCH_URL, params=params)
+  24:             response.raise_for_status()
+  25:         except Exception as exc:
+  26:             logger.warning("DuckDuckGo search failed: {exc}", exc=exc)
+  27:             return []
+  28:         urls = re.findall(r"<a[^>]+class=\"result__a\"[^>]*href=\"(.*?)\"", response.text)
+  29:         cleaned: List[str] = []
+  30:         for href in urls:
+  31:             href = _html.unescape(href)
+  32:             # Normalize protocol-relative and relative links
+  33:             if href.startswith("//"):
+  34:                 href = "https:" + href
+  35:             elif href.startswith("/"):
+  36:                 href = "https://duckduckgo.com" + href
+  37: 
+  38:             try:
+  39:                 u = httpx.URL(href)
+  40:             except Exception:
+  41:                 continue
+  42: 
+  43:             # Unwrap DuckDuckGo redirector /l/?uddg=...
+  44:             if u.host and "duckduckgo.com" in u.host and u.path.startswith("/l/"):
+  45:                 target = u.params.get("uddg", "")
+  46:                 if target:
+  47:                     try:
+  48:                         href = str(httpx.URL(target))
+  49:                     except Exception:
+  50:                         href = target
+  51: 
+  52:             cleaned.append(href)
+  53:             if len(cleaned) >= limit:
+  54:                 break
+  55:         # Deduplicate while preserving order
+  56:         seen = set()
+  57:         unique: List[str] = []
+  58:         for u in cleaned:
+  59:             if u and u not in seen:
+  60:                 seen.add(u)
+  61:                 unique.append(u)
+  62:         logger.debug(
+  63:             "DuckDuckGo returned {count} results for query '{query}'",
+  64:             count=len(unique),
+  65:             query=query,
+  66:         )
+  67:         return unique
+  68: 
+  69: 
+  70: _BLOCKLIST_HOSTS = {
+  71:     # Aggregators / directories / number lookups / news
+  72:     "houjin.info",
+  73:     "houjin.jp",
+  74:     "corporatedb.jp",
+  75:     "baseconnect.in",
+  76:     "jpnumber.com",
+  77:     "prtimes.jp",
+  78:     "irbank.net",
+  79:     "maonline.jp",
+  80:     "data-link-plus.com",
+  81:     # News/media
+  82:     "toonippo.co.jp",
+  83:     "yahoo.co.jp",
+  84:     "asahi.com",
+  85:     "mainichi.jp",
+  86:     "yomiuri.co.jp",
+  87:     "nikkei.com",
+  88:     "nhk.or.jp",
+  89: }
+  90: 
+  91: # Explicit exclusion by substring match (case-insensitive)
+  92: EXCLUDE_KEYWORDS = [
+  93:     # Corporate directories / DBs
+  94:     'houjin.jp',
+  95:     'corporatedb.jp',
+  96:     'baseconnect.in',
+  97:     'cnavi.g-search.or.jp',
+  98:     'detail/',
+  99:     'mynavi.jp',
+ 100:     'fumadata.com',
+ 101:     'salesnow.jp',
+ 102:     'hpsm.noor.jp',
+ 103:     'www.nakai-seika.co.jp',
+ 104:     'www.dreamnews.jp',
+ 105:     'en-gage.net',
+ 106:     'alarmbox.jp',
+ 107:     'shoku-bank.jp',
+ 108:     'ameblo.jp',
+ 109:     'houjin.goo.to',
+ 110:     'khn-messe.jp',
+ 111:     'www.ekiten.jp',
+ 112:     'tabelog.com',
+ 113:     'prtimes.jp',
+ 114:     'gmo-connect.com',
+ 115:     'www.hatomarksite.com',
+ 116:     'map.yahoo.co.jp',
+ 117:     'jbplt.jp',
+ 118:     'akala.ai',
+ 119:     'www.suinaka.or.jp',
+ 120:     'itp.ne.jp',
+ 121:     'caretaxi-net.com',
+ 122:     'takunavi.jp',
+ 123:     'www.tdb.co.jp',
+ 124:     'www.buffett-code.com',
+ 125:     'mado2.jp',
+ 126:     'toukibo.ai-con.lawyer',
+ 127:     'www.osakataxi.or.jp',
+ 128:     'doda.jp',
+ 129:     'info.gbiz.go.jp',
+ 130:     'www.nikkei.com',
+ 131:     'www.facebook.com',
+ 132:     'baseconnect.in',
+ 133:     'www.b-mall.ne.jp',
+ 134:     'www.seino.co.jp',
+ 135:     '?',
+ 136:     '%',
+ 137:     'x-work.jp',
+ 138:     'www.akabou.ne.jp',
+ 139:     'www2.akabou.ne.jp',
+ 140:     'www.hellowork.careers',
+ 141:     'drivers-job.biz',
+ 142:     'sline.co.jp',
+ 143:     'korps.jp',
+ 144:     'www.big-advance.site',
+ 145:     'www.cookdoor.jp',
+ 146:     'www.nohhi.co.jp',
+ 147:     'job.trck.jp',
+ 148:     'job.goo.to',
+ 149:     'www.yabashi.co.jp',
+ 150:     'offerers.jp',
+ 151:     'curama.jp',
+ 152:     'www.marutokusangyo.co.jp',
+ 153:     'www.daidolife.com',
+ 154:     'www.introcompa.com',
+ 155:     'truckaichi.com',
+ 156:     'doraever.jp',
+ 157:     'search?',
+ 158:     'jp.indeed.com',
+ 159:     'www.mapion.co.jp',
+ 160: ]
+ 161: 
+ 162: 
+ 163: def is_blocked_host(url: str) -> bool:
+ 164:     try:
+ 165:         u = httpx.URL(url)
+ 166:         host = (u.host or "").lower()
+ 167:     except Exception:
+ 168:         return True
+ 169:     if host.startswith("www."):
+ 170:         host = host[4:]
+ 171:     return any(host == b or host.endswith("." + b) for b in _BLOCKLIST_HOSTS)
+ 172: 
+ 173: 
+ 174: def _score_url(url: str) -> Tuple[int, int]:
+ 175:     """Lower score is prioritized. Heuristics:
+ 176:     - Penalize known aggregator hosts.
+ 177:     - Prefer .co.jp /.ne.jp /.or.jp /.jp, then .com; others after.
+ 178:     """
+ 179:     try:
+ 180:         u = httpx.URL(url)
+ 181:     except Exception:
+ 182:         return (100, 100)
+ 183:     host = (u.host or "").lower()
+ 184:     if host.startswith("www."):
+ 185:         host = host[4:]
+ 186:     tld_penalty = 5
+ 187:     if host.endswith(".co.jp") or host.endswith(".ne.jp") or host.endswith(".or.jp"):
+ 188:         tld_penalty = 0
+ 189:     elif host.endswith(".jp"):
+ 190:         tld_penalty = 1
+ 191:     elif host.endswith(".com"):
+ 192:         tld_penalty = 2
+ 193:     block_penalty = 10 if any(host == b or host.endswith("." + b) for b in _BLOCKLIST_HOSTS) else 0
+ 194:     return (block_penalty + tld_penalty, len(url))
+ 195: 
+ 196: 
+ 197: async def search_company(name: str, address: str | None) -> List[str]:
+ 198:     settings = get_settings()
+ 199:     # Normalize company name and address to improve search robustness
+ 200:     name_n = normalize_text(name) or name
+ 201:     addr = (address or "").strip()
+ 202:     addr_n = normalize_text(addr) if addr else ""
+ 203:     query = f"{name_n} {addr_n}" if addr_n else name_n
+ 204:     # Bias search towards company profile pages
+ 205:     query = f"{query} 企業概要E
+ 206:     if settings.search_engine == "duckduckgo":
+ 207:         urls = await duckduckgo_search(query, limit=settings.search_result_limit)
+ 208:         # Exclude URLs by explicit keywords
+ 209:         lowers = []
+ 210:         filtered: List[str] = []
+ 211:         for u in urls:
+ 212:             lu = u.lower()
+ 213:             # Skip blocked hosts entirely
+ 214:             if is_blocked_host(u):
+ 215:                 continue
+ 216:             if any(key in lu for key in EXCLUDE_KEYWORDS):
+ 217:                 continue
+ 218:             filtered.append(u)
+ 219:         # Sort with heuristic to prioritize likely official sites
+ 220:         filtered.sort(key=_score_url)
+ 221:         logger.debug("Candidates for '{q}': {urls}", q=query, urls=filtered)
+ 222:         return filtered
+ 223:     raise ValueError(f"Unsupported search engine: {settings.search_engine}")
+ 224: 
+ 225: 
+ 226: async def gather_searches(companies: List[dict]) -> List[List[str]]:
+ 227:     semaphore = asyncio.Semaphore(get_settings().concurrency_limit)
+ 228: 
+ 229:     async def _search(company: dict) -> List[str]:
+ 230:         async with semaphore:
+ 231:             try:
+ 232:                 return await search_company(company["name"], company["address"])
+ 233:             except Exception as exc:
+ 234:                 logger.exception("Search failed for company_id={id}: {exc}", id=company["id"], exc=exc)
+ 235:                 return []
+ 236: 
+ 237:     return await asyncio.gather(*[_search(company) for company in companies])

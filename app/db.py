@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Iterable, Iterator, List, Optional, Tuple
 
 from sqlalchemy import (
@@ -126,9 +126,17 @@ def fetch_companies(
     offset: int = 0,
     prioritize_missing: bool = True,
 ) -> List[dict]:
+    settings = get_settings()
     query = select(companies).where(companies.c.skip.is_(False))
     if skip_existing:
-        query = query.where(or_(companies.c.homepage_url.is_(None), companies.c.homepage_url == ""))
+        # Treat 'NOT_FOUND' as re-checkable after a configured window
+        threshold = datetime.utcnow() - timedelta(days=int(settings.recheck_not_found_days))
+        missing_clause = or_(companies.c.homepage_url.is_(None), companies.c.homepage_url == "")
+        not_found_clause = and_(
+            companies.c.homepage_url == "NOT_FOUND",
+            or_(companies.c.last_checked_at.is_(None), companies.c.last_checked_at < threshold),
+        )
+        query = query.where(or_(missing_clause, not_found_clause))
     if prefecture:
         # Filter by dedicated prefecture_name column when available
         if "prefecture_name" in companies.c:
@@ -176,7 +184,11 @@ def count_missing_by_prefecture(engine: Engine, prefecture: Optional[str] = None
         else:
             where_parts.append(companies.c.address.contains(prefecture))
 
-    missing_clause = or_(companies.c.homepage_url.is_(None), companies.c.homepage_url == "")
+    missing_clause = or_(
+        companies.c.homepage_url.is_(None),
+        companies.c.homepage_url == "",
+        companies.c.homepage_url == "NOT_FOUND",
+    )
     with engine.begin() as conn:
         total = conn.execute(select(func.count()).select_from(companies).where(*where_parts)).scalar_one()
         missing = conn.execute(

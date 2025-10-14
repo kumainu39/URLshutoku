@@ -8,6 +8,7 @@ sqlalchemy
 psycopg2-binary
 jinja2
 pydantic>=2.0
+pydantic-settings>=2.0
 rapidfuzz
 loguru
 

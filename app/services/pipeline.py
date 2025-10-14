@@ -5,10 +5,12 @@ from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional
 
 from bs4 import BeautifulSoup
+import httpx
 from loguru import logger
 
 from .. import db
 from ..crawler import extract, fetch, search
+from ..crawler.search import is_blocked_host
 from .llm import LLMRequest, LLMVerifier
 
 
@@ -113,11 +115,14 @@ class CrawlPipeline:
 
         async with self._state_lock:
             state.log.add(f"検索開始: {company['name']} ({company['corporate_number']})")
-        # Use city-level address (prefecture + city) for search queries
-        city_address = f"{company.get('prefecture_name', '')}{company.get('city_name', '')}".strip()
-        if not city_address:
-            city_address = company.get("address")
-        candidate_urls = await search.search_company(company["name"], city_address)
+        # Use prefecture-only for search queries (exclude municipalities)
+        prefecture_only = (company.get("prefecture_name") or "").strip()
+        if not prefecture_only:
+            # Fallback: if structured prefecture missing, fall back to raw address as-is
+            # (search.search_company will handle normalization). This may include city,
+            # but we prefer prefecture when available.
+            prefecture_only = company.get("address")
+        candidate_urls = await search.search_company(company["name"], prefecture_only)
 
         if not candidate_urls:
             async with self._state_lock:
@@ -126,10 +131,10 @@ class CrawlPipeline:
             db.update_company(
                 self.engine,
                 company["id"],
-                homepage_url=None,
+                homepage_url="NOT_FOUND",
                 capital=None,
                 industry=None,
-                status="no_candidates",
+                status="not_found",
             )
             async with self._state_lock:
                 state.log.add("候補URLが見つかりませんでした。")
@@ -141,12 +146,36 @@ class CrawlPipeline:
         for url in candidate_urls:
             async with self._state_lock:
                 state.log.add(f"確認中: {url}")
-            soup = await fetch.fetch_html(url)
-            if soup is None:
+            # Skip known aggregator/job/database hosts before fetching
+            if is_blocked_host(url):
                 continue
-            # Verification uses full address (including street number) via company['address']
-            result = await self._verify_candidate(soup, company, url)
-            if result is None:
+
+            # Try a small set of URL variants on the same host to improve homepage discovery
+            try:
+                u = httpx.URL(url)
+                base = f"{u.scheme}://{u.host}"
+            except Exception:
+                base = None
+            variants = [url]
+            if base:
+                for path in ["/", "/company", "/about", "/about-us", "/corporate", "/company/profile"]:
+                    v = base + path
+                    if v not in variants:
+                        variants.append(v)
+
+            matched = False
+            for vurl in variants:
+                soup = await fetch.fetch_html(vurl)
+                if soup is None:
+                    continue
+                # Verification uses full address (including street number) via company['address']
+                result = await self._verify_candidate(soup, company, vurl)
+                if result is not None:
+                    matched = True
+                    # If variant differs from original, still persist the matched homepage URL
+                    url = result.homepage_url
+                    break
+            if not matched:
                 continue
             async with self._state_lock:
                 state.successes += 1
@@ -154,7 +183,7 @@ class CrawlPipeline:
             db.update_company(
                 self.engine,
                 company["id"],
-                homepage_url=result.homepage_url,
+                homepage_url=url,
                 capital=result.capital,
                 industry=result.industry,
                 status="matched",
@@ -169,10 +198,10 @@ class CrawlPipeline:
         db.update_company(
             self.engine,
             company["id"],
-            homepage_url=None,
+            homepage_url="NOT_FOUND",
             capital=None,
             industry=None,
-            status="no_match",
+            status="not_found",
         )
         async with self._state_lock:
             state.log.add("一致するページがありませんでした。")
@@ -186,23 +215,31 @@ class CrawlPipeline:
             company_name=company["name"],
             address=company["address"],
         )
-        if result.matched:
-            return result
+        # Use LLM (when enabled) to avoid DB/求人サイト and confirm official homepage.
+        llm_ok: Optional[bool] = None
         if self.llm.enabled:
-            llm_result = self.llm.validate(
+            llm_ok = self.llm.validate(
                 LLMRequest(
                     company_name=company["name"],
                     address=company["address"],
                     page_text=soup.get_text(separator=" "),
                 )
             )
-            if llm_result:
-                return extract.ExtractionResult(
-                    matched=True,
-                    homepage_url=url,
-                    capital=result.capital,
-                    industry=result.industry,
-                )
+
+        # Accept only if content matches AND (LLM agrees or LLM not available)
+        if result.matched:
+            if llm_ok is False:
+                return None
+            return result
+
+        # If heuristic failed but LLM strongly agrees, accept as homepage
+        if llm_ok is True:
+            return extract.ExtractionResult(
+                matched=True,
+                homepage_url=url,
+                capital=result.capital,
+                industry=result.industry,
+            )
         return None
 
 

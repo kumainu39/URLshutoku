@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import asyncio
 import re
@@ -12,24 +12,18 @@ from ..config import get_settings
 from .normalize import normalize_text
 
 DUCKDUCKGO_SEARCH_URL = "https://html.duckduckgo.com/html/"
-DUCKDUCKGO_FALLBACK_URL = "https://duckduckgo.com/html/"
 
 
 async def duckduckgo_search(query: str, *, limit: int) -> List[str]:
-    # Do not use DuckDuckGo's date filter by default; it can hide many
-    # long-lived corporate profile pages. Keep locale bias only.
-    params = {"q": query, "kl": "jp-jp"}
+    params = {"q": query, "kl": "jp-jp", "df": "y"}
     settings = get_settings()
     headers = {"User-Agent": settings.user_agent}
     async with httpx.AsyncClient(timeout=settings.http_timeout_seconds, headers=headers, follow_redirects=True) as client:
-        for attempt, url in enumerate((DUCKDUCKGO_SEARCH_URL, DUCKDUCKGO_FALLBACK_URL), start=1):
-            try:
-                response = await client.get(url, params=params)
-                response.raise_for_status()
-                break
-            except Exception as exc:
-                logger.warning("DuckDuckGo search failed (attempt {n}): {exc}", n=attempt, exc=exc)
-        else:
+        try:
+            response = await client.get(DUCKDUCKGO_SEARCH_URL, params=params)
+            response.raise_for_status()
+        except Exception as exc:
+            logger.warning("DuckDuckGo search failed: {exc}", exc=exc)
             return []
         urls = re.findall(r"<a[^>]+class=\"result__a\"[^>]*href=\"(.*?)\"", response.text)
         cleaned: List[str] = []
@@ -92,23 +86,10 @@ _BLOCKLIST_HOSTS = {
     "yomiuri.co.jp",
     "nikkei.com",
     "nhk.or.jp",
-    "storyweb.jp",
-    "nifty.com",
-    "n-seikei.jp",
-    "white-company-navi.jp",
-    "reashu.com",
-    "boot20.com",
-    "refowork.com",
-    "bankin-h.or.jp",
-    "digital-construction.jp",
 }
 
 # Explicit exclusion by substring match (case-insensitive)
 EXCLUDE_KEYWORDS = [
-    # Corporate directories / DBs
-    'houjin.jp',
-    'corporatedb.jp',
-    'baseconnect.in',
     'cnavi.g-search.or.jp',
     'detail/',
     'mynavi.jp',
@@ -172,35 +153,7 @@ EXCLUDE_KEYWORDS = [
     'search?',
     'jp.indeed.com',
     'www.mapion.co.jp',
-    'news.',
-    '/news',
-    '/press',
-    '/prtimes',
-    '/column',
-    '/blog',
-    '/sponsor',
-    '/unionroster',
-    'storyweb.jp',
-    'nifty.com',
-    'n-seikei.jp',
-    'white-company-navi.jp',
-    'reashu.com',
-    'boot20.com',
-    'refowork.com',
-    'bankin-h.or.jp',
-    'digital-construction.jp',
 ]
-
-
-def is_blocked_host(url: str) -> bool:
-    try:
-        u = httpx.URL(url)
-        host = (u.host or "").lower()
-    except Exception:
-        return True
-    if host.startswith("www."):
-        host = host[4:]
-    return any(host == b or host.endswith("." + b) for b in _BLOCKLIST_HOSTS)
 
 
 def _score_url(url: str) -> Tuple[int, int]:
@@ -223,24 +176,7 @@ def _score_url(url: str) -> Tuple[int, int]:
     elif host.endswith(".com"):
         tld_penalty = 2
     block_penalty = 10 if any(host == b or host.endswith("." + b) for b in _BLOCKLIST_HOSTS) else 0
-        # Path penalties: favor homepage/about/company over deep news/press/blog pages
-    path = (u.path or "").lower()
-    path_penalty = 0
-    hot_words = ["/news", "/press", "/column", "/blog", "/sponsor", "/ir/"]
-    if any(hw in path for hw in hot_words):
-        path_penalty += 5
-    # Prefer shallow paths
-    depth = path.count("/")
-    path_penalty += max(0, depth - 1)
-    # Bonuses for likely official company pages
-    good_starts = ["/company", "/corporate"]
-    if any(path.startswith(gs) for gs in good_starts):
-        path_penalty -= 4
-    if "/about" in path or "/about-us" in path or "/company/profile" in path:
-        path_penalty -= 3
-    if path in ("", "/"):
-        path_penalty -= 2
-    return (block_penalty + tld_penalty + path_penalty, len(url))
+    return (block_penalty + tld_penalty, len(url))
 
 
 async def search_company(name: str, address: str | None) -> List[str]:
@@ -249,30 +185,23 @@ async def search_company(name: str, address: str | None) -> List[str]:
     name_n = normalize_text(name) or name
     addr = (address or "").strip()
     addr_n = normalize_text(addr) if addr else ""
-    base = f"{name_n} {addr_n}" if addr_n else name_n
-
-    # Try common Japanese profile terms, most common first.
-    suffixes = ["会社概要", "企業情報", "会社情報", "企業概要"]
-
+    query = f"{name_n} {addr_n}" if addr_n else name_n
+    # Bias search towards company profile pages
+    query = f"{query} 企業概要E
     if settings.search_engine == "duckduckgo":
-        for idx, suffix in enumerate(suffixes):
-            query = f"{base} {suffix}"
-            urls = await duckduckgo_search(query, limit=settings.search_result_limit)
-            filtered: List[str] = []
-            for u in urls:
-                lu = u.lower()
-                # Skip blocked hosts entirely
-                if is_blocked_host(u):
-                    continue
-                if any(key in lu for key in EXCLUDE_KEYWORDS):
-                    continue
-                filtered.append(u)
-            # Sort with heuristic to prioritize likely official sites
-            filtered.sort(key=_score_url)
-            logger.debug("Candidates for '{q}': {urls}", q=query, urls=filtered)
-            if filtered:
-                return filtered
-        return []
+        urls = await duckduckgo_search(query, limit=settings.search_result_limit)
+        # Exclude URLs by explicit keywords
+        lowers = []
+        filtered: List[str] = []
+        for u in urls:
+            lu = u.lower()
+            if any(key in lu for key in EXCLUDE_KEYWORDS):
+                continue
+            filtered.append(u)
+        # Sort with heuristic to prioritize likely official sites
+        filtered.sort(key=_score_url)
+        logger.debug("Candidates for '{q}': {urls}", q=query, urls=filtered)
+        return filtered
     raise ValueError(f"Unsupported search engine: {settings.search_engine}")
 
 
